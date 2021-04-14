@@ -1,0 +1,17 @@
+{
+    "name": "CarbonFiberGames.Steamworks",
+    "rootNamespace": "VaporNetworking.Steam",
+    "references": [
+        "GUID:fe3f27e2ddd513d48842779335c9b295",
+        "GUID:b32561556eeecc941821fa7fb29e2ecd"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

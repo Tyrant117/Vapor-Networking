@@ -38,5 +38,8 @@ namespace VaporNetworking
         public const short DynamicInteract = 151;
 
         public const short LootBagRequest = 200;
+
+        // Steamworks
+        public const short AttemptP2PConnection = 1000;
     }
 }

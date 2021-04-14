@@ -1,3 +1,6 @@
+# v1.1.0
+* Added steamworks p2p as an option.
+
 # v1.0.2
 * Edit logger to work with unity.
 
