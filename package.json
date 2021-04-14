@@ -1,6 +1,6 @@
 {
   "name": "com.carbonfibergames.vapornetworking",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "displayName": "Vapor Networking",
   "description": "Simple Networking Client-Server Networking Package built with KCP UPD",
   "unity": "2019.4",
