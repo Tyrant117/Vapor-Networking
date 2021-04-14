@@ -235,6 +235,11 @@ namespace VaporNetworking.Steam
 
 
         }
+#else
+    public SteamConnection() : base(0)
+        {
+
+        }
 #endif
     }
 }

@@ -1,6 +1,9 @@
 # v1.1.1
 * Assembly define constraint "STEAMWORKS"
 
+# v1.1.1
+* Assembly define constraint "STEAMWORKS"
+
 # v1.1.0
 * Added steamworks p2p as an option.
 
