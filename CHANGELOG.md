@@ -1,4 +1,7 @@
-# v1.1.1
+# v1.1.3
+* Steamworks Moved to Package
+
+# v1.1.2
 * Assembly define constraint "STEAMWORKS"
 
 # v1.1.1
