@@ -1,6 +1,6 @@
 {
     "name": "CarbonFiberGames.VaporNetworking",
-    "rootNamespace": "",
+    "rootNamespace": "VaporNetworking",
     "references": [
         "GUID:f39eb216e5034409abcd117541a8ba44"
     ],

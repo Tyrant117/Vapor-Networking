@@ -235,6 +235,24 @@ namespace VaporNetworking
         public static void Connect(string address, int port) => client.Connect(address, Port, NoDelay, Interval, FastResend, CongestionWindow, SendWindowSize, ReceiveWindowSize);
         public static void SimulatedConnect(int connectionID) => simulatedServerQueue.Enqueue(new SimulatedMessage(connectionID, SimulatedEventType.Connected, default));
         public static void Disconnect() => client?.Disconnect();
+
+        public static void ClientEarlyUpdate()
+        {
+            if (IsSimulated) { return; }
+            if (IsClient)
+            {
+                client.TickIncoming();
+            }
+        }
+
+        public static void ClientLateUpdate()
+        {
+            if (IsSimulated) { return; }
+            if (IsClient)
+            {
+                client.TickOutgoing();
+            }
+        }
         #endregion
 
         #region - Server -
@@ -267,6 +285,25 @@ namespace VaporNetworking
         public static bool Active => server.IsActive();
         public static void StartServer(string address, int port) => server.Start((ushort)port);
         public static void StopServer() => server.Stop();
+
+        public static void ServerEarlyUpdate()
+        {
+            if (IsSimulated) { return; }
+            if (IsServer)
+            {
+                server.TickIncoming();
+            }
+        }
+
+        public static void ServerLateUpdate()
+        {
+            if (IsSimulated) { return; }
+            if (IsServer)
+            {
+                server.TickOutgoing();
+            }
+        }
+
         public static string GetClientAddress(int connectionId) => server.GetClientAddress(connectionId);
         public static bool DisconnectPeer(int connectionId) { server.Disconnect(connectionId); return true; }
         #endregion

@@ -201,11 +201,14 @@ namespace VaporNetworking
         {
             if (!isInitialized) { return; }
 
-            if (!isSimulated)
-            {
-                UDPTransport.Process();
-            }
-            else
+            //if (!isSimulated)
+            //{
+            //    UDPTransport.Process();
+            //}
+            //else
+            //{
+            //}
+            if (isSimulated)
             {
                 while (UDPTransport.ReceiveSimulatedMessage(UDPTransport.Source.Client, out int connID, out UDPTransport.TransportEvent transportEvent, out ArraySegment<byte> data))
                 {
@@ -223,6 +226,17 @@ namespace VaporNetworking
                     }
                 }
             }
+        }
+
+        internal static void NetworkEarlyUpdate()
+        {
+            // process all incoming messages first before updating the world
+            UDPTransport.ClientEarlyUpdate();
+        }
+
+        internal static void NetworkLateUpdate()
+        {
+            UDPTransport.ClientLateUpdate();
         }
 
         private void OnApplicationQuit()

@@ -169,11 +169,14 @@ namespace VaporNetworking
         {
             if (!isInitialized) { return; }
 
-            if (!isSimulated)
-            {
-                UDPTransport.Process();
-            }
-            else
+            //if (!isSimulated)
+            //{
+            //    UDPTransport.Process();
+            //}
+            //else
+            //{
+            //}
+            if (isSimulated)
             {
                 while (UDPTransport.ReceiveSimulatedMessage(UDPTransport.Source.Server, out int connectionId, out UDPTransport.TransportEvent transportEvent, out ArraySegment<byte> data))
                 {
@@ -191,6 +194,16 @@ namespace VaporNetworking
                     }
                 }
             }
+        }
+
+        internal static void NetworkEarlyUpdate()
+        {
+            UDPTransport.ServerEarlyUpdate();
+        }
+
+        internal static void NetworkLateUpdate()
+        {
+            UDPTransport.ServerLateUpdate();
         }
         #endregion
 
