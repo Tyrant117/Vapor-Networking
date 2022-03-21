@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 
 namespace VaporNetworking
@@ -20,73 +22,143 @@ namespace VaporNetworking
         }
 
         public int Position;
-        public int Length => buffer.Count;
+        /// <summary>Total number of bytes to read from buffer</summary>
+        public int Length
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => buffer.Count;
+        }
+        /// <summary>Remaining bytes that can be read, for convenience.</summary>
+        public int Remaining
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Length - Position;
+        }
+
+        #region - Blittable -
+        // ReadBlittable<T> from DOTSNET
+        // this is extremely fast, but only works for blittable types.
+        // => private to make sure nobody accidentally uses it for non-blittable
+        //
+        // Benchmark: see NetworkWriter.WriteBlittable!
+        //
+        // Note:
+        //   ReadBlittable assumes same endianness for server & client.
+        //   All Unity 2018+ platforms are little endian.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal unsafe T ReadBlittable<T>()
+            where T : unmanaged
+        {
+            // check if blittable for safety
+#if UNITY_EDITOR
+            if (!UnsafeUtility.IsBlittable(typeof(T)))
+            {
+                throw new ArgumentException($"{typeof(T)} is not blittable!");
+            }
+#endif
+
+            // calculate size
+            //   sizeof(T) gets the managed size at compile time.
+            //   Marshal.SizeOf<T> gets the unmanaged size at runtime (slow).
+            // => our 1mio writes benchmark is 6x slower with Marshal.SizeOf<T>
+            // => for blittable types, sizeof(T) is even recommended:
+            // https://docs.microsoft.com/en-us/dotnet/standard/native-interop/best-practices
+            int size = sizeof(T);
+
+            // enough data to read?
+            if (Position + size > buffer.Count)
+            {
+                throw new EndOfStreamException($"ReadBlittable<{typeof(T)}> out of range: {ToString()}");
+            }
+
+            // read blittable
+            T value;
+            fixed (byte* ptr = &buffer.Array[buffer.Offset + Position])
+            {
+                // cast buffer to a T* pointer and then read from it.
+                value = *(T*)ptr;
+            }
+            Position += size;
+            return value;
+        }
+
+
+        // blittable'?' template for code reuse
+        // note: bool isn't blittable. need to read as byte.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal T? ReadBlittableNullable<T>()
+            where T : unmanaged =>
+                ReadByte() != 0 ? ReadBlittable<T>() : default(T?);
+        #endregion
 
         #region - Reading -
-        public byte ReadByte() { if (Position + 1 > buffer.Count) { throw new EndOfStreamException("ReadByte out of range:" + ToString()); } return buffer.Array[buffer.Offset + Position++]; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public byte ReadByte() => ReadBlittable<byte>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public byte? ReadByteNullable() => ReadBlittableNullable<byte>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public sbyte ReadSByte() { return (sbyte)ReadByte(); }
-        public char ReadChar() { return (char)ReadUInt16(); }
-        public bool ReadBoolean() { return ReadByte() != 0; }
-        public short ReadInt16() { return (short)ReadUInt16(); }
-        public ushort ReadUInt16()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public sbyte? ReadSByteNullable() => ReadBlittableNullable<sbyte>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public char ReadChar() => (char)ReadBlittable<ushort>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public char? ReadCharNullable() => (char?)ReadBlittableNullable<ushort>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool ReadBoolean() => ReadBlittable<byte>() != 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool? ReadBoolNullable()
         {
-            ushort value = 0;
-            value |= ReadByte();
-            value |= (ushort)(ReadByte() << 8);
-            return value;
+            byte? value = ReadBlittableNullable<byte>();
+            return value.HasValue ? (value.Value != 0) : default(bool?);
         }
-        public int ReadInt32() { return (int)ReadUInt32(); }
-        public uint ReadUInt32()
-        {
-            uint value = 0;
-            value |= ReadByte();
-            value |= (uint)(ReadByte() << 8);
-            value |= (uint)(ReadByte() << 16);
-            value |= (uint)(ReadByte() << 24);
-            return value;
-        }
-        public long ReadInt64() { return (long)ReadUInt64(); }
-        public ulong ReadUInt64()
-        {
-            ulong value = 0;
-            value |= ReadByte();
-            value |= ((ulong)ReadByte()) << 8;
-            value |= ((ulong)ReadByte()) << 16;
-            value |= ((ulong)ReadByte()) << 24;
-            value |= ((ulong)ReadByte()) << 32;
-            value |= ((ulong)ReadByte()) << 40;
-            value |= ((ulong)ReadByte()) << 48;
-            value |= ((ulong)ReadByte()) << 56;
-            return value;
-        }
-        public decimal ReadDecimal()
-        {
-            UIntDecimal converter = new UIntDecimal();
-            converter.longValue1 = ReadUInt64();
-            converter.longValue2 = ReadUInt64();
-            return converter.decimalValue;
-        }
-        public float ReadSingle()
-        {
-            UIntFloat converter = new UIntFloat();
-            converter.intValue = ReadUInt32();
-            return converter.floatValue;
-        }
-        public double ReadDouble()
-        {
-            UIntDouble converter = new UIntDouble();
-            converter.longValue = ReadUInt64();
-            return converter.doubleValue;
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public short ReadShort() => (short)ReadUShort();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public short? ReadShortNullable() => ReadBlittableNullable<short>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ushort ReadUShort() => ReadBlittable<ushort>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ushort? ReadUShortNullable() => ReadBlittableNullable<ushort>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int ReadInt() => ReadBlittable<int>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int? ReadIntNullable() => ReadBlittableNullable<int>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint ReadUInt() => ReadBlittable<uint>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint? ReadUIntNullable() => ReadBlittableNullable<uint>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long ReadLong()  => ReadBlittable<long>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long? ReadLongNullable() => ReadBlittableNullable<long>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong ReadULong() => ReadBlittable<ulong>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong? ReadULongNullable() => ReadBlittableNullable<ulong>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float ReadFloat() => ReadBlittable<float>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float? ReadFloatNullable() => ReadBlittableNullable<float>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double ReadDouble() => ReadBlittable<double>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double? ReadDoubleNullable() => ReadBlittableNullable<double>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public decimal ReadDecimal() => ReadBlittable<decimal>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public decimal? ReadDecimalNullable() => ReadBlittableNullable<decimal>();
 
-        static readonly UTF8Encoding encoding = new UTF8Encoding(false, true);
+        static readonly UTF8Encoding encoding = new(false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public string ReadString()
         {
             // read number of bytes
-            ushort size = ReadUInt16();
-
+            ushort size = ReadUShort();
             if (size == 0)
+            {
                 return null;
+            }
 
             int realSize = size - 1;
 
@@ -102,6 +174,7 @@ namespace VaporNetworking
             return encoding.GetString(data.Array, data.Offset, data.Count);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public byte[] ReadBytes(int count)
         {
             byte[] bytes = new byte[count];
@@ -109,20 +182,27 @@ namespace VaporNetworking
             return bytes;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public byte[] ReadBytes(byte[] bytes, int count)
         {
             // check if passed byte array is big enough
             if (count > bytes.Length)
             {
-                throw new EndOfStreamException("ReadBytes can't read " + count + " + bytes because the passed byte[] only has length " + bytes.Length);
+                throw new EndOfStreamException($"ReadBytes can't read {count} + bytes because the passed byte[] only has length {bytes.Length}");
+            }
+            // check if within buffer limits
+            if (Position + count > buffer.Count)
+            {
+                throw new EndOfStreamException($"ReadBytesSegment can't read {count} bytes because it would read past the end of the stream. {ToString()}");
             }
 
-            ArraySegment<byte> data = ReadBytesSegment(count);
-            Array.Copy(data.Array, data.Offset, bytes, 0, count);
+            Array.Copy(buffer.Array, buffer.Offset + Position, bytes, 0, count);
+            Position += count;
             return bytes;
         }
 
         // useful to parse payloads etc. without allocating
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ArraySegment<byte> ReadBytesSegment(int count)
         {
             // check if within buffer limits
@@ -132,133 +212,62 @@ namespace VaporNetworking
             }
 
             // return the segment
-            ArraySegment<byte> result = new ArraySegment<byte>(buffer.Array, buffer.Offset + Position, count);
+            ArraySegment<byte> result = new(buffer.Array, buffer.Offset + Position, count);
             Position += count;
             return result;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public byte[] ReadBytesAndSize()
         {
             // count = 0 means the array was null
             // otherwise count -1 is the length of the array
-            uint count = ReadPackedUInt32();
+            uint count = ReadUInt();
             return count == 0 ? null : ReadBytes(checked((int)(count - 1u)));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ArraySegment<byte> ReadBytesAndSizeSegment()
         {
             // count = 0 means the array was null
             // otherwise count - 1 is the length of the array
-            uint count = ReadPackedUInt32();
+            uint count = ReadUInt();
             return count == 0 ? default : ReadBytesSegment(checked((int)(count - 1u)));
         }
 
-        public int ReadPackedInt32()
-        {
-            uint data = ReadPackedUInt32();
-            return (int)((data >> 1) ^ -(data & 1));
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2 ReadVector2() => ReadBlittable<Vector2>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2? ReadVector2Nullable() => ReadBlittableNullable<Vector2>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2Int ReadVector2Int() => ReadBlittable<Vector2Int>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3 ReadVector3() => ReadBlittable<Vector3>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3? ReadVector3Nullable() => ReadBlittableNullable<Vector3>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3Int ReadVector3Int() => ReadBlittable<Vector3Int>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3Int? ReadVector3IntNullable() => ReadBlittableNullable<Vector3Int>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector4 ReadVector4() => ReadBlittable<Vector4>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector4? ReadVector4Nullable() => ReadBlittableNullable<Vector4>();
 
-        // http://sqlite.org/src4/doc/trunk/www/varint.wiki
-        // NOTE: big endian.
-        public UInt32 ReadPackedUInt32()
-        {
-            UInt64 value = ReadPackedUInt64();
-            if (value > UInt32.MaxValue)
-            {
-                throw new IndexOutOfRangeException("ReadPackedUInt32() failure, value too large");
-            }
-            return (UInt32)value;
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Color ReadColor() => ReadBlittable<Color>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Color? ReadColorNullable() => ReadBlittableNullable<Color>();
 
-        public UInt64 ReadPackedUInt64()
-        {
-            byte a0 = ReadByte();
-            if (a0 < 241)
-            {
-                return a0;
-            }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Color32 ReadColor32() => ReadBlittable<Color32>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Color32? ReadColor32Nullable() => ReadBlittableNullable<Color32>();
 
-            byte a1 = ReadByte();
-            if (a0 >= 241 && a0 <= 248)
-            {
-                return 240 + 256 * (a0 - ((UInt64)241)) + a1;
-            }
-
-            byte a2 = ReadByte();
-            if (a0 == 249)
-            {
-                return 2288 + (((UInt64)256) * a1) + a2;
-            }
-
-            byte a3 = ReadByte();
-            if (a0 == 250)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16);
-            }
-
-            byte a4 = ReadByte();
-            if (a0 == 251)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16) + (((UInt64)a4) << 24);
-            }
-
-            byte a5 = ReadByte();
-            if (a0 == 252)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16) + (((UInt64)a4) << 24) + (((UInt64)a5) << 32);
-            }
-
-            byte a6 = ReadByte();
-            if (a0 == 253)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16) + (((UInt64)a4) << 24) + (((UInt64)a5) << 32) + (((UInt64)a6) << 40);
-            }
-
-            byte a7 = ReadByte();
-            if (a0 == 254)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16) + (((UInt64)a4) << 24) + (((UInt64)a5) << 32) + (((UInt64)a6) << 40) + (((UInt64)a7) << 48);
-            }
-
-            byte a8 = ReadByte();
-            if (a0 == 255)
-            {
-                return a1 + (((UInt64)a2) << 8) + (((UInt64)a3) << 16) + (((UInt64)a4) << 24) + (((UInt64)a5) << 32) + (((UInt64)a6) << 40) + (((UInt64)a7) << 48) + (((UInt64)a8) << 56);
-            }
-
-            throw new IndexOutOfRangeException("ReadPackedUInt64() failure: " + a0);
-        }
-
-        public Vector2 ReadVector2()
-        {
-            return new Vector2(ReadSingle(), ReadSingle());
-        }
-
-        public Vector2Int ReadVector2Int()
-        {
-            return new Vector2Int(ReadPackedInt32(), ReadPackedInt32());
-        }
-
-        public Vector3 ReadVector3()
-        {
-            return new Vector3(ReadSingle(), ReadSingle(), ReadSingle());
-        }
-
-        public Vector3Int ReadVector3Int()
-        {
-            return new Vector3Int(ReadPackedInt32(), ReadPackedInt32(), ReadPackedInt32());
-        }
-
-        public Vector4 ReadVector4()
-        {
-            return new Vector4(ReadSingle(), ReadSingle(), ReadSingle(), ReadSingle());
-        }
-
-        public Quaternion ReadQuaternion()
-        {
-            return new Quaternion(ReadSingle(), ReadSingle(), ReadSingle(), ReadSingle());
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Quaternion ReadQuaternion() => ReadBlittable<Quaternion>();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Quaternion? ReadQuaternionNullable() => ReadBlittableNullable<Quaternion>();
         #endregion
     }
 }

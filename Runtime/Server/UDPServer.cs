@@ -20,8 +20,6 @@ namespace VaporNetworking
         private bool isInitialized;
         private bool isSetup;
 
-        private NetWriter w;
-
         #region Inspector
         [Header("Logging"), Tooltip("Log level for network debugging")]
         public NetLogFilter.LogLevel logLevel;
@@ -73,7 +71,7 @@ namespace VaporNetworking
         public event PeerActionHandler PeerDisconnected;
         #endregion
 
-        #region --- Unity Methods and Initialization ---
+        #region - Unity Methods and Initialization -
         protected void Awake()
         {
             if (instance != null && instance != this)
@@ -83,7 +81,6 @@ namespace VaporNetworking
             }
 
             instance = this;
-            w = new NetWriter();
             NetLogFilter.CurrentLogLevel = (int)logLevel;
             NetLogFilter.spew = debugSpew;
             NetLogFilter.messageDiagnostics = messageDiagnostics;
@@ -167,31 +164,21 @@ namespace VaporNetworking
 
         protected void LateUpdate()
         {
-            if (!isInitialized) { return; }
+            if (!isInitialized || !isSimulated) { return; }
 
-            //if (!isSimulated)
-            //{
-            //    UDPTransport.Process();
-            //}
-            //else
-            //{
-            //}
-            if (isSimulated)
+            while (UDPTransport.ReceiveSimulatedMessage(UDPTransport.Source.Server, out int connectionId, out UDPTransport.TransportEvent transportEvent, out ArraySegment<byte> data))
             {
-                while (UDPTransport.ReceiveSimulatedMessage(UDPTransport.Source.Server, out int connectionId, out UDPTransport.TransportEvent transportEvent, out ArraySegment<byte> data))
+                switch (transportEvent)
                 {
-                    switch (transportEvent)
-                    {
-                        case UDPTransport.TransportEvent.Connected:
-                            HandleConnect(connectionId);
-                            break;
-                        case UDPTransport.TransportEvent.Data:
-                            HandleData(connectionId, data, 1);
-                            break;
-                        case UDPTransport.TransportEvent.Disconnected:
-                            HandleDisconnect(connectionId);
-                            break;
-                    }
+                    case UDPTransport.TransportEvent.Connected:
+                        HandleConnect(connectionId);
+                        break;
+                    case UDPTransport.TransportEvent.Data:
+                        HandleData(connectionId, data, 1);
+                        break;
+                    case UDPTransport.TransportEvent.Disconnected:
+                        HandleDisconnect(connectionId);
+                        break;
                 }
             }
         }
@@ -207,12 +194,12 @@ namespace VaporNetworking
         }
         #endregion
 
-        #region --- Module Methods ---
+        #region - Module Methods -
         /// <summary>
         ///     Adds a network module to the manager.
         /// </summary>
         /// <param name="module"></param>
-        public void AddModule(ServerModule module)
+        protected void AddModule(ServerModule module)
         {
             if (modules.ContainsKey(module.GetType()))
             {
@@ -255,10 +242,6 @@ namespace VaporNetworking
                     // Module is already initialized
                     if (initializedModules.Contains(mod.Key)) { continue; }
 
-                    // Not all dependencies have been initialized. Wait until they are.
-                    if (!mod.Value.Dependencies.All(d => initializedModules.Any(d.IsAssignableFrom))) { continue; }
-
-                    mod.Value.Server = this;
                     mod.Value.Initialize(this);
                     initializedModules.Add(mod.Key);
                     changed = true;
@@ -291,7 +274,7 @@ namespace VaporNetworking
         ///     Gets all initialized modules.
         /// </summary>
         /// <returns></returns>
-        public List<ServerModule> GetInitializedModules()
+        protected List<ServerModule> GetInitializedModules()
         {
             return modules
                 .Where(m => initializedModules.Contains(m.Key))
@@ -303,7 +286,7 @@ namespace VaporNetworking
         ///     Gets all unitialized modules.
         /// </summary>
         /// <returns></returns>
-        public List<ServerModule> GetUninitializedModules()
+        protected List<ServerModule> GetUninitializedModules()
         {
             return modules
                 .Where(m => !initializedModules.Contains(m.Key))
@@ -312,7 +295,7 @@ namespace VaporNetworking
         }
         #endregion
 
-        #region --- Remote Connection Methods ---
+        #region - Remote Connection Methods -
         protected virtual void HandleConnect(int connectionID)
         {
             if (NetLogFilter.logDebug) { Debug.LogFormat("Connection ID: {0} Connected", connectionID); }
@@ -324,7 +307,7 @@ namespace VaporNetworking
 
             connectedPeers[peer.connectionID] = peer;
 
-            PeerConnected?.Invoke(peer);
+            OnPeerConnected(peer);
         }
 
         protected virtual void HandleDisconnect(int connectionID)
@@ -337,7 +320,7 @@ namespace VaporNetworking
 
             connectedPeers.Remove(peer.connectionID);
 
-            PeerDisconnected?.Invoke(peer);
+            OnPeerDisconnected(peer);
         }
 
         protected void OnPeerConnected(Peer peer)
@@ -351,7 +334,7 @@ namespace VaporNetworking
         }
         #endregion
 
-        #region --- Handle Message Methods ---
+        #region - Handle Message Methods -
         private void HandleData(int connectionID, ArraySegment<byte> buffer, int channelID)
         {
             if (connectedPeers.TryGetValue(connectionID, out Peer peer))
@@ -439,10 +422,10 @@ namespace VaporNetworking
         }
         #endregion
 
-        #region --- Messaging Methods ---
+        #region - Messaging Methods -
         public void Send(short opcode, ISerializablePacket packet)
         {
-            using (PooledNetWriter w = NetWriterPool.GetWriter())
+            using (PooledNetWriter w = NetWriterPool.Get())
             {
                 MessageHelper.CreateAndFinalize(w, opcode, packet);
                 var segment = w.ToArraySegment();
@@ -468,7 +451,7 @@ namespace VaporNetworking
         {
             if (peer == null || !peer.IsConnected) { return; }
 
-            using (PooledNetWriter w = NetWriterPool.GetWriter())
+            using (PooledNetWriter w = NetWriterPool.Get())
             {
                 MessageHelper.CreateAndFinalize(w, opcode, packet);
                 var segment = w.ToArraySegment();
@@ -483,19 +466,6 @@ namespace VaporNetworking
                 }
             }
         }
-
-        //public void Send(Peer peer, short opcode, ISerializablePacket packet, int responseID, bool comepleteResponse, ResponseStatus status)
-        //{
-        //    if (peer == null || !peer.IsConnected) { return; }
-
-        //    using (PooledNetWriter w = NetWriterPool.GetWriter())
-        //    {
-        //        MessageHelper.CreateAndFinalize(w, opcode, packet, responseID, comepleteResponse, status);
-        //        var segment = w.ToArraySegment();
-        //        if (NetLogFilter.messageDiagnostics) { NetDiagnostics.OnSend(opcode, segment.Count, 1); }
-        //        peer.SendMessage(segment);
-        //    }
-        //}
         #endregion
     }
 }

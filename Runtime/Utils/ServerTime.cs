@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace VaporNetworking
@@ -13,33 +14,32 @@ namespace VaporNetworking
         // average out the last few results from Ping
         public static int PingWindowSize = 10;
 
-        private static ExponentialMovingAverage rtt = new ExponentialMovingAverage(10);
-        private static ExponentialMovingAverage offset = new ExponentialMovingAverage(10);
-
-        // Date and time when the application started
-        private static readonly Stopwatch stopwatch = new Stopwatch();
+        private static ExponentialMovingAverage rtt = new(10);
+        private static ExponentialMovingAverage offset = new(10);
 
         // the true offset guaranteed to be in this range
         private static double offsetMin = double.MinValue;
         private static double offsetMax = double.MaxValue;
 
-        static ServerTime()
+        public static double LocalTime
         {
-            stopwatch.Start();
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => UnityEngine.Time.timeAsDouble;
         }
 
-        // returns the clock time _in this system_
-        private static double LocalTime => stopwatch.Elapsed.TotalSeconds;
-
+        // RuntimeInitializeOnLoadMethod -> fast playmode without domain reload
+        [RuntimeInitializeOnLoadMethod]
         public static void Reset()
         {
+            PingFrequency = 2.0f;
+            PingWindowSize = 10;
             rtt = new ExponentialMovingAverage(PingWindowSize);
             offset = new ExponentialMovingAverage(PingWindowSize);
             offsetMin = double.MinValue;
             offsetMax = double.MaxValue;
         }
 
-        internal static PingPacket Ping => new PingPacket() { lastPingPacketTime = LocalTime };
+        internal static PingPacket Ping => new() { lastPingPacketTime = LocalTime };
 
         // executed at the server when we receive a ping message
         // reply with a pong containing the time from the client
@@ -67,29 +67,29 @@ namespace VaporNetworking
             double now = LocalTime;
 
             // how long did this message take to come back
-            double rtt = now - pong.clientTime;
-            ServerTime.rtt.Add(rtt);
+            double newRtt = now - pong.clientTime;
+            rtt.Add(newRtt);
 
             // the difference in time between the client and the server
             // but subtract half of the rtt to compensate for latency
             // half of rtt is the best approximation we have
-            double offset = now - rtt * 0.5f - pong.serverTime;
+            double newOffset = now - newRtt * 0.5f - pong.serverTime;
 
-            double newOffsetMin = now - rtt - pong.serverTime;
+            double newOffsetMin = now - newRtt - pong.serverTime;
             double newOffsetMax = now - pong.serverTime;
             offsetMin = Math.Max(offsetMin, newOffsetMin);
             offsetMax = Math.Min(offsetMax, newOffsetMax);
 
-            if (ServerTime.offset.Value < offsetMin || ServerTime.offset.Value > offsetMax)
+            if (offset.Value < offsetMin || offset.Value > offsetMax)
             {
                 // the old offset was offrange,  throw it away and use new one
-                ServerTime.offset = new ExponentialMovingAverage(PingWindowSize);
-                ServerTime.offset.Add(offset);
+                offset = new ExponentialMovingAverage(PingWindowSize);
+                offset.Add(newOffset);
             }
-            else if (offset >= offsetMin || offset <= offsetMax)
+            else if (newOffset >= offsetMin || newOffset <= offsetMax)
             {
                 // new offset looks reasonable,  add to the average
-                ServerTime.offset.Add(offset);
+                offset.Add(newOffset);
             }
         }
 
@@ -105,7 +105,11 @@ namespace VaporNetworking
         // in other words,  if the server is running for 2 months,
         // and you cast down to float,  then the time will jump in 0.4s intervals.
         // Notice _offset is 0 at the server
-        public static double Time => LocalTime - offset.Value;
+        public static double Time
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => LocalTime - offset.Value;
+        }
 
         // measure volatility of time.
         // the higher the number,  the less accurate the time is

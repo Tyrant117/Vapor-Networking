@@ -70,9 +70,9 @@ namespace VaporNetworking
         /// <returns></returns>
         public T Deserialize<T>(T packetToBeFilled) where T : struct, ISerializablePacket
         {
-            using (PooledNetReader r = NetReaderPool.GetReader(Buffer))
+            using (PooledNetReader r = NetReaderPool.Get(Buffer))
             {
-                r.ReadInt16(); // This is the opcode that is still part of the data.
+                r.ReadShort(); // This is the opcode that is still part of the data.
                 packetToBeFilled.Deserialize(r);
                 return packetToBeFilled;
             }

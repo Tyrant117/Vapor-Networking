@@ -250,7 +250,7 @@ namespace VaporNetworking.Steam
         {
             if (!network.LocalConnection.InLobby) { return; }
 
-            using (PooledNetWriter w = NetWriterPool.GetWriter())
+            using (PooledNetWriter w = NetWriterPool.Get())
             {
                 MessageHelper.CreateAndFinalize(w, opcode, packet);
                 var array = w.ToArray();

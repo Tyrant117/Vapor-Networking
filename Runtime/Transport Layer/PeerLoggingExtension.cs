@@ -7,8 +7,8 @@ namespace VaporNetworking
     public class PeerLoggingExtension
     {
         private readonly bool isServerLog;
-        private List<string> log;
-        private StringBuilder sb;
+        private readonly List<string> log;
+        private readonly StringBuilder sb;
 
         public PeerLoggingExtension(bool isServerLog)
         {
@@ -19,20 +19,20 @@ namespace VaporNetworking
 
         public void Log(string format)
         {
-            sb.AppendFormat("({0}) {1}", ServerTime.Time, format);
+            sb.Append($"({ServerTime.Time}) {format}");
             log.Add(sb.ToString());
             sb.Clear();
         }
         public void Log(string format, params object[] args)
         {
-            sb.AppendFormat("({0}) {1}", ServerTime.Time, string.Format(format, args));
+            sb.Append($"({ServerTime.Time}) {string.Format(format, args)}");
             log.Add(sb.ToString());
             sb.Clear();
         }
 
         public void WriteToFile()
         {
-            System.IO.StringWriter w = new System.IO.StringWriter();
+            System.IO.StringWriter w = new();
             for (int i = 0; i < log.Count; i++)
             {
                 w.WriteLine(log[i]);

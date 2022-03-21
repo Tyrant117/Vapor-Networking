@@ -9,14 +9,14 @@ namespace VaporNetworking
 
         public void Deserialize(NetReader r)
         {
-            id = r.ReadPackedUInt64();
+            id = Compression.DecompressULong(r);
             flag = r.ReadByte();
         }
 
         public void Serialize(NetWriter w)
         {
-            w.WritePackedUInt64(id);
-            w.Write(flag);
+            Compression.CompressULong(w, id);
+            w.WriteByte(flag);
         }
     }
 }

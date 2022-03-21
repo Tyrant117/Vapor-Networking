@@ -1,67 +1,69 @@
 ﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+using System.Runtime.CompilerServices;
 
 namespace VaporNetworking
 {
-    public class PooledNetReader : NetReader, IDisposable
+    public sealed class PooledNetReader : NetReader, IDisposable
     {
         internal PooledNetReader(byte[] bytes) : base(bytes) { }
         internal PooledNetReader(ArraySegment<byte> segment) : base(segment) { }
 
         public void Dispose()
         {
-            NetReaderPool.Recycle(this);
+            NetReaderPool.Return(this);
         }
     }
 
     public static class NetReaderPool
     {
-        static readonly Stack<PooledNetReader> pool = new Stack<PooledNetReader>();
+        // reuse Pool<T>
+        // we still wrap it in NetworkReaderPool.Get/Recyle so we can reset the
+        // position and array before reusing.
+        static readonly Pool<PooledNetReader> Pool = new Pool<PooledNetReader>(
+            // byte[] will be assigned in GetReader
+            () => new PooledNetReader(new byte[] { }),
+            // initial capacity to avoid allocations in the first few frames
+            1000
+        );
 
-        public static PooledNetReader GetReader(byte[] bytes)
+        /// <summary>Get the next reader in the pool. If pool is empty, creates a new Reader</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static PooledNetReader Get(byte[] bytes)
         {
-            if (pool.Count != 0)
-            {
-                PooledNetReader reader = pool.Pop();
-                // reset buffer
-                SetBuffer(reader, bytes);
-                return reader;
-            }
-
-            return new PooledNetReader(bytes);
+            // grab from pool & set buffer
+            PooledNetReader reader = Pool.Get();
+            SetBuffer(reader, bytes);
+            return reader;
         }
 
-        public static PooledNetReader GetReader(ArraySegment<byte> segment)
+        /// <summary>Get the next reader in the pool. If pool is empty, creates a new Reader</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static PooledNetReader Get(ArraySegment<byte> segment)
         {
-            if (pool.Count != 0)
-            {
-                PooledNetReader reader = pool.Pop();
-                // reset buffer
-                SetBuffer(reader, segment);
-                return reader;
-            }
-
-            return new PooledNetReader(segment);
+            // grab from pool & set buffer
+            PooledNetReader reader = Pool.Get();
+            SetBuffer(reader, segment);
+            return reader;
         }
 
-        // SetBuffer methods mirror constructor for ReaderPool
+        /// <summary>Returns a reader to the pool.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static void SetBuffer(NetReader reader, byte[] bytes)
         {
             reader.buffer = new ArraySegment<byte>(bytes);
             reader.Position = 0;
         }
 
+        /// <summary>Returns a reader to the pool.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static void SetBuffer(NetReader reader, ArraySegment<byte> segment)
         {
             reader.buffer = segment;
             reader.Position = 0;
         }
 
-        public static void Recycle(PooledNetReader reader)
-        {
-            pool.Push(reader);
-        }
+        /// <summary>Returns a reader to the pool.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Return(PooledNetReader reader) => Pool.Return(reader);
     }
 }

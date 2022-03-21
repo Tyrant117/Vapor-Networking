@@ -166,7 +166,7 @@ namespace VaporNetworking.Steam
             if (!IsConnected) { return; }
             if (!IsLocal) { return; }
 
-            using (PooledNetWriter w = NetWriterPool.GetWriter())
+            using (PooledNetWriter w = NetWriterPool.Get())
             {
                 MessageHelper.CreateAndFinalize(w, opcode, packet);
                 var segment = w.ToArray();
@@ -206,7 +206,7 @@ namespace VaporNetworking.Steam
             if (!IsConnected) { return; }
             if (!IsLocal) { return; }
 
-            using (PooledNetWriter w = NetWriterPool.GetWriter())
+            using (PooledNetWriter w = NetWriterPool.Get())
             {
                 MessageHelper.CreateAndFinalize(w, opcode, packet);
                 var segment = w.ToArray();

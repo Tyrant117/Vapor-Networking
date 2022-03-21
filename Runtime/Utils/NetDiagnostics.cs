@@ -31,8 +31,8 @@ namespace VaporNetworking
             }
         }
 
-        private static Queue<int> bytesIn = new Queue<int>(10);
-        private static Queue<int> bytesOut = new Queue<int>(10);
+        private static readonly Queue<int> bytesIn = new(10);
+        private static readonly Queue<int> bytesOut = new(10);
 
         private static float lastTime;
         private static int outInterval;

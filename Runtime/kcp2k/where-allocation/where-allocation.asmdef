@@ -1,12 +1,10 @@
 {
-    "name": "kcp",
-    "rootNamespace": "kcp2k",
-    "references": [
-        "GUID:c1ced61e63e65a241bca71e4a6b9de3a"
-    ],
+    "name": "WhereAllocation",
+    "rootNamespace": "WhereAllocation",
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": true,
+    "allowUnsafeCode": false,
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,

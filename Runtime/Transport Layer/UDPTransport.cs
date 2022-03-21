@@ -24,10 +24,15 @@ namespace VaporNetworking
 
         // Transport Configuration
         public static ushort Port = 7777;
+        // DualMode listens to IPv6 and IPv4 simultaneously. Disable if the platform only supports IPv4.
+        public static bool DualMode = true;
         // NoDelay is recommended to reduce latency. This also scales better without buffers getting full.
         public static bool NoDelay = true;
         // KCP internal update interval. 100ms is KCP default, but a lower interval is recommended to minimize latency and to scale to more networked entities.
         public static uint Interval = 10;
+        // KCP timeout in milliseconds. Note that KCP sends a ping automatically.
+        public static int Timeout = 10000;
+
         // Advanced
         // KCP fastresend parameter. Faster resend for the cost of higher bandwidth. 0 in normal mode, 2 in turbo mode.
         public static int FastResend = 2;
@@ -37,6 +42,12 @@ namespace VaporNetworking
         public static uint SendWindowSize = 4096; //Kcp.WND_SND; 32 by default. Mirror sends a lot, so we need a lot more.
         // KCP window size can be modified to support higher loads.
         public static uint ReceiveWindowSize = 4096; //Kcp.WND_RCV; 128 by default. Mirror sends a lot, so we need a lot more.
+        // KCP will try to retransmit lost messages up to MaxRetransmit (aka dead_link) before disconnecting.
+        public static uint MaxRetransmit = Kcp.DEADLINK * 2; // default prematurely disconnects a lot of people (#3022). use 2x.
+        // Enable to use where-allocation NonAlloc KcpServer/Client/Connection versions. Highly recommended on all Unity platforms.
+        public static bool NonAlloc = true;
+        // Enable to automatically set client & server send/recv buffers to OS limit. Avoids issues with too small buffers under heavy load, potentially dropping connections. Increase the OS limit if this is still too small.
+        public static bool MaximizeSendReceiveBuffersToOSLimit = true;
 
         private static KcpClient client;
         private static KcpServer server;
@@ -45,14 +56,21 @@ namespace VaporNetworking
         private static bool IsClient;
 
         private static bool IsSimulated;
-        private static ConcurrentQueue<SimulatedMessage> simulatedServerQueue = new ConcurrentQueue<SimulatedMessage>();
-        private static ConcurrentQueue<SimulatedMessage> simulatedClientQueue = new ConcurrentQueue<SimulatedMessage>();
+        private static readonly ConcurrentQueue<SimulatedMessage> simulatedServerQueue = new();
+        private static readonly ConcurrentQueue<SimulatedMessage> simulatedClientQueue = new();
+
+        // translate Kcp <-> Mirror channels
+        static UDPChannels FromKcpChannel(KcpChannel channel) =>
+            channel == KcpChannel.Reliable ? UDPChannels.Reliable : UDPChannels.Unreliable;
+
+        static KcpChannel ToKcpChannel(UDPChannels channel) =>
+            channel == UDPChannels.Reliable ? KcpChannel.Reliable : KcpChannel.Unreliable;
 
         public static void Init(bool isServer = false, bool isClient = false, bool isSimulated = false)
         {
-            IsServer = isServer ? true : IsServer;
-            IsClient = isClient ? true : IsClient;
-            IsSimulated = isSimulated ? true : IsSimulated;
+            IsServer = isServer || IsServer;
+            IsClient = isClient || IsClient;
+            IsSimulated = isSimulated || IsSimulated;
 
             if (isSimulated)
             {
@@ -60,31 +78,58 @@ namespace VaporNetworking
                 return;
             }
 
+#if ENABLE_IL2CPP
+            // NonAlloc doesn't work with IL2CPP builds
+            NonAlloc = false;
+#endif
+
             if (IsServer && server == null)
             {
                 // server
-                server = new KcpServer(
-                    (connectionId) => OnServerConnected.Invoke(connectionId),
-                    (connectionId, message) => OnServerDataReceived.Invoke(connectionId, message, (int)UDPChannels.Reliable),
-                    (connectionId) => OnServerDisconnected.Invoke(connectionId),
-                    NoDelay,
-                    Interval,
-                    FastResend,
-                    CongestionWindow,
-                    SendWindowSize,
-                    ReceiveWindowSize
-                );
+                server = NonAlloc
+                ? new KcpServerNonAlloc(
+                      (connectionId) => OnServerConnected.Invoke(connectionId),
+                      (connectionId, message, channel) => OnServerDataReceived.Invoke(connectionId, message, (int)FromKcpChannel(channel)),
+                      (connectionId) => OnServerDisconnected.Invoke(connectionId),
+                      DualMode,
+                      NoDelay,
+                      Interval,
+                      FastResend,
+                      CongestionWindow,
+                      SendWindowSize,
+                      ReceiveWindowSize,
+                      Timeout,
+                      MaxRetransmit,
+                      MaximizeSendReceiveBuffersToOSLimit)
+                : new KcpServer(
+                      (connectionId) => OnServerConnected.Invoke(connectionId),
+                      (connectionId, message, channel) => OnServerDataReceived.Invoke(connectionId, message, (int)FromKcpChannel(channel)),
+                      (connectionId) => OnServerDisconnected.Invoke(connectionId),
+                      DualMode,
+                      NoDelay,
+                      Interval,
+                      FastResend,
+                      CongestionWindow,
+                      SendWindowSize,
+                      ReceiveWindowSize,
+                      Timeout,
+                      MaxRetransmit,
+                      MaximizeSendReceiveBuffersToOSLimit);
                 if (NetLogFilter.logInfo) { Debug.Log("Transport Layer Initialized: Server"); }
             }
 
             if (IsClient && client == null)
             {
                 // client
-                client = new KcpClient(
-                    () => OnClientConnected.Invoke(),
-                    (message) => OnClientDataReceived.Invoke(message, (int)UDPChannels.Reliable),
-                    () => OnClientDisconnected.Invoke()
-                );
+                client = NonAlloc
+                ? new KcpClientNonAlloc(
+                      () => OnClientConnected.Invoke(),
+                      (message, channel) => OnClientDataReceived.Invoke(message, (int)FromKcpChannel(channel)),
+                      () => OnClientDisconnected.Invoke())
+                : new KcpClient(
+                      () => OnClientConnected.Invoke(),
+                      (message, channel) => OnClientDataReceived.Invoke(message, (int)FromKcpChannel(channel)),
+                      () => OnClientDisconnected.Invoke());
                 if (NetLogFilter.logInfo) { Debug.Log("Transport Layer Initialized: Client"); }
             }
         }
@@ -111,35 +156,19 @@ namespace VaporNetworking
             server?.Stop();
         }
 
-        public static bool Send(int connectionID, ArraySegment<byte> segment, Source source = Source.Default, int channelId = 1)
+        public static bool Send(int connectionID, ArraySegment<byte> segment, Source source = Source.Default, UDPChannels channelId = UDPChannels.Reliable)
         {
             if (source == Source.Default) { return false; }
 
             if (source == Source.Server && IsServer)
             {
-                switch (channelId)
-                {
-                    case (int)UDPChannels.Unreliable:
-                        server.Send(connectionID, segment, KcpChannel.Unreliable);
-                        break;
-                    default:
-                        server.Send(connectionID, segment, KcpChannel.Reliable);
-                        break;
-                }
+                server.Send(connectionID, segment, ToKcpChannel(channelId));
                 return true;
             }
 
             if (source == Source.Client && IsClient)
             {
-                switch (channelId)
-                {
-                    case (int)UDPChannels.Unreliable:
-                        client.Send(segment, KcpChannel.Unreliable);
-                        break;
-                    default:
-                        client.Send(segment, KcpChannel.Reliable);
-                        break;
-                }
+                client.Send(segment, ToKcpChannel(channelId));
                 return true;
             }
 
@@ -233,6 +262,17 @@ namespace VaporNetworking
         public static bool Connected => client.connected;
 
         public static void Connect(string address, int port) => client.Connect(address, Port, NoDelay, Interval, FastResend, CongestionWindow, SendWindowSize, ReceiveWindowSize);
+        public static void Connect(Uri uri)
+        {
+            if (uri.Scheme != Scheme)
+            {
+                throw new ArgumentException($"Invalid url {uri}, use {Scheme}://host:port instead", nameof(uri));
+            }
+
+            int serverPort = uri.IsDefaultPort ? Port : uri.Port;
+            client.Connect(uri.Host, (ushort)serverPort, NoDelay, Interval, FastResend, CongestionWindow, SendWindowSize, ReceiveWindowSize, Timeout, MaxRetransmit, MaximizeSendReceiveBuffersToOSLimit);
+        }
+
         public static void SimulatedConnect(int connectionID) => simulatedServerQueue.Enqueue(new SimulatedMessage(connectionID, SimulatedEventType.Connected, default));
         public static void Disconnect() => client?.Disconnect();
 
@@ -276,10 +316,12 @@ namespace VaporNetworking
 
         public Uri ServerUri()
         {
-            UriBuilder builder = new UriBuilder();
-            builder.Scheme = Scheme;
-            builder.Host = Dns.GetHostName();
-            builder.Port = Port;
+            UriBuilder builder = new()
+            {
+                Scheme = Scheme,
+                Host = Dns.GetHostName(),
+                Port = Port
+            };
             return builder.Uri;
         }
         public static bool Active => server.IsActive();
@@ -315,13 +357,11 @@ namespace VaporNetworking
             // switch to kcp channel.
             // unreliable or reliable.
             // default to reliable just to be sure.
-            switch (channelId)
+            return channelId switch
             {
-                case (int)UDPChannels.Unreliable:
-                    return KcpConnection.UnreliableMaxMessageSize;
-                default:
-                    return KcpConnection.ReliableMaxMessageSize;
-            }
+                (int)UDPChannels.Unreliable => KcpConnection.UnreliableMaxMessageSize,
+                _ => KcpConnection.ReliableMaxMessageSize(ReceiveWindowSize),
+            };
         }
 
         // Server Statistics
@@ -344,15 +384,21 @@ namespace VaporNetworking
         {
             // bytes
             if (bytes < 1024)
+            {
                 return $"{bytes} B";
+            }
             // kilobytes
             else if (bytes < 1024L * 1024L)
-                return $"{(bytes / 1024f):F2} KB";
+            {
+                return $"{bytes / 1024f:F2} KB";
+            }
             // megabytes
             else if (bytes < 1024 * 1024L * 1024L)
-                return $"{(bytes / (1024f * 1024f)):F2} MB";
+            {
+                return $"{bytes / (1024f * 1024f):F2} MB";
+            }
             // gigabytes
-            return $"{(bytes / (1024f * 1024f * 1024f)):F2} GB";
+            return $"{bytes / (1024f * 1024f * 1024f):F2} GB";
         }
 
         public static void OnLogStatistics(bool logToConsole, out string serverLog, out string clientLog)

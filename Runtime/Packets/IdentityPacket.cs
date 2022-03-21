@@ -6,14 +6,14 @@ namespace VaporNetworking
     {
         public ulong identity;
 
-        public void Deserialize(NetReader reader)
+        public void Deserialize(NetReader r)
         {
-            identity = reader.ReadPackedUInt64();
+            identity = Compression.DecompressULong(r);
         }
 
-        public void Serialize(NetWriter writer)
+        public void Serialize(NetWriter w)
         {
-            writer.WritePackedUInt64(identity);
+            Compression.CompressULong(w, identity);
         }
     }
 }

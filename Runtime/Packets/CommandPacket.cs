@@ -17,7 +17,7 @@ namespace VaporNetworking
 
         public void Serialize(NetWriter w)
         {
-            w.Write(Command);
+            w.WriteByte(Command);
             w.WriteBytesAndSizeSegment(data);
         }
     }

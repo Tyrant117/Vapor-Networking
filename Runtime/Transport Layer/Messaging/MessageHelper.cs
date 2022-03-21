@@ -16,7 +16,7 @@ namespace VaporNetworking
         /// <returns></returns>
         public static T Deserialize<T>(int offset, ArraySegment<byte> data, T packet) where T : struct, ISerializablePacket
         {
-            using (PooledNetReader r = NetReaderPool.GetReader(data))
+            using (PooledNetReader r = NetReaderPool.Get(data))
             {
                 r.Position = offset;
                 packet.Deserialize(r);
@@ -26,7 +26,7 @@ namespace VaporNetworking
 
         public static void CreateAndFinalize(NetWriter w, short opCode, ISerializablePacket packet/*, int responseID = -1, bool comepleteResponse = false, ResponseStatus status = ResponseStatus.Default*/)
         {
-            w.Write(opCode);
+            w.WriteShort(opCode);
             packet.Serialize(w);
         }
 
@@ -38,9 +38,9 @@ namespace VaporNetworking
         /// <returns></returns>
         public static IncomingMessage FromBytes(ArraySegment<byte> buffer, Peer sender)
         {
-            using (PooledNetReader r = NetReaderPool.GetReader(buffer))
+            using (PooledNetReader r = NetReaderPool.Get(buffer))
             {
-                var opCode = r.ReadInt16();
+                var opCode = r.ReadShort();
                 var msg = new IncomingMessage(opCode, buffer, sender/*, responseID, completeResponse, status*/);
 
                 return msg;

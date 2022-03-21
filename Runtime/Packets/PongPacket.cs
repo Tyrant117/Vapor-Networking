@@ -16,8 +16,8 @@ namespace VaporNetworking
 
         public void Serialize(NetWriter writer)
         {
-            writer.Write(clientTime);
-            writer.Write(serverTime);
+            writer.WriteDouble(clientTime);
+            writer.WriteDouble(serverTime);
         }
     }
 }

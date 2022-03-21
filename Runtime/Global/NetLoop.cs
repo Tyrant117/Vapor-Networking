@@ -12,6 +12,18 @@ namespace VaporNetworking
         // helper enum to add loop to begin/end of subSystemList
         internal enum AddMode { Beginning, End }
 
+        // callbacks in case someone needs to use early/lateupdate too.
+        public static Action OnEarlyUpdate;
+        public static Action OnLateUpdate;
+
+        // RuntimeInitializeOnLoadMethod -> fast playmode without domain reload
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void ResetStatics()
+        {
+            OnEarlyUpdate = null;
+            OnLateUpdate = null;
+        }
+
         // helper function to find an update function's index in a player loop
         // type. this is used for testing to guarantee our functions are added
         // at the beginning/end properly.
@@ -19,7 +31,9 @@ namespace VaporNetworking
         {
             // did we find the type? e.g. EarlyUpdate/PreLateUpdate/etc.
             if (playerLoop.type == playerLoopSystemType)
+            {
                 return Array.FindIndex(playerLoop.subSystemList, (elem => elem.updateDelegate == function));
+            }
 
             // recursively keep looking
             if (playerLoop.subSystemList != null)
@@ -72,7 +86,7 @@ namespace VaporNetworking
                 // => PlayerLoopSystem has native IntPtr loop members
                 // => forgetting to clear those would cause undefined behaviour!
                 // see also: https://github.com/vis2k/Mirror/pull/2652
-                PlayerLoopSystem system = new PlayerLoopSystem
+                PlayerLoopSystem system = new()
                 {
                     type = ownerType,
                     updateDelegate = function
@@ -107,13 +121,15 @@ namespace VaporNetworking
                 for (int i = 0; i < playerLoop.subSystemList.Length; ++i)
                 {
                     if (AddToPlayerLoop(function, ownerType, ref playerLoop.subSystemList[i], playerLoopSystemType, addMode))
+                    {
                         return true;
+                    }
                 }
             }
             return false;
         }
 
-        [RuntimeInitializeOnLoadMethod]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void RuntimeInitializeOnLoad()
         {
             Debug.Log("Adding Network[Early/Late]Update to Unity...");
@@ -139,14 +155,16 @@ namespace VaporNetworking
 
         private static void NetworkEarlyUpdate()
         {
-            //Debug.Log("NetworkEarlyUpdate @ " + Time.time);
             UDPServer.NetworkEarlyUpdate();
             UDPClient.NetworkEarlyUpdate();
+
+            OnEarlyUpdate?.Invoke();
         }
 
         private static void NetworkLateUpdate()
         {
-            //Debug.Log("NetworkLateUpdate @ " + Time.time);
+            OnLateUpdate?.Invoke();
+
             UDPServer.NetworkLateUpdate();
             UDPClient.NetworkLateUpdate();
         }

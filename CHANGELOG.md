@@ -1,3 +1,6 @@
+# v2.0.0
+* Breaking changes to transport layer and serializing.
+
 # v1.1.3
 * Steamworks Moved to Package
 
